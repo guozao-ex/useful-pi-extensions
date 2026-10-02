@@ -96,8 +96,12 @@ const DEFAULT_RESERVE_TOKENS = 16_384
  * pi's built-in tui.editor.cursorLineEnd. ctrl+q is free: unbound in both pi-tui's TUI_KEYBINDINGS
  * and pi's app KEYBINDINGS on macOS/Linux (only Windows maps ctrl+q, to followUp), and pi already
  * binds ctrl+s, so the terminal runs with flow control (IXON) off and ctrl+q reaches the app.
+ *
+ * On Windows pi >=0.99 binds app.message.followUp to ctrl+q, so registerShortcut('ctrl+q') is
+ * rejected there as a built-in conflict; this build uses alt+t (unbound in pi 0.99.x on all
+ * platforms, unused by the other installed extensions).
  */
-const BREAKDOWN_SHORTCUT = 'ctrl+q'
+const BREAKDOWN_SHORTCUT = 'alt+t'
 const FETCH_TIMEOUT_MS = 5000
 
 function today(): string {
@@ -294,7 +298,10 @@ interface Totals {
   cacheRead: number
   cacheWrite: number
   cost: number
+  /** Token-weighted cache hit rate across every assistant call, not just the most recent one. */
   cacheHitRate: number | null
+  cacheHitRead: number
+  cacheHitPrompt: number
   todayCost: number
 }
 
@@ -315,6 +322,8 @@ function collectTotals(ctx: ExtensionContext, since: number): Totals {
     cacheWrite: 0,
     cost: 0,
     cacheHitRate: null,
+    cacheHitRead: 0,
+    cacheHitPrompt: 0,
     todayCost: 0,
   }
   // `usage` stays optional here even though an assistant message always carries it:
@@ -329,7 +338,10 @@ function collectTotals(ctx: ExtensionContext, since: number): Totals {
     if (isToday) totals.todayCost += usage.cost.total
     if (!assistant) return
     const prompt = usage.input + usage.cacheRead + usage.cacheWrite
-    if (prompt > 0) totals.cacheHitRate = (usage.cacheRead / prompt) * 100
+    if (prompt > 0) {
+      totals.cacheHitRead += usage.cacheRead
+      totals.cacheHitPrompt += prompt
+    }
   }
   for (const entry of ctx.sessionManager.getEntries()) {
     const stamp =
@@ -348,6 +360,8 @@ function collectTotals(ctx: ExtensionContext, since: number): Totals {
       add(entry.usage, false, isToday)
     }
   }
+  totals.cacheHitRate =
+    totals.cacheHitPrompt > 0 ? (totals.cacheHitRead / totals.cacheHitPrompt) * 100 : null
   return totals
 }
 
@@ -589,7 +603,7 @@ export default function (pi: ExtensionAPI) {
           )
 
           // The breakdown panel sits directly under the meter it explains, before the identity
-          // row. The concise footer renders by default; ctrl+q or /breakdown opens the panel.
+          // row. The concise footer renders by default; alt+t or /breakdown opens the panel.
           let breakdown: string[] | null = null
           if (detailVisible) {
             const used = shown?.tokens ?? 0
@@ -807,7 +821,7 @@ export default function (pi: ExtensionAPI) {
   })
 
   // The breakdown panel is opt-in: the concise footer stays the default. Both toggles remember
-  // the choice in the config file. ctrl+q is unbound across pi's default keymaps; if another
+  // the choice in the config file. alt+t is unbound across pi's default keymaps; if another
   // extension owns it here, BREAKDOWN_SHORTCUT is the one place to move it.
   pi.registerShortcut(BREAKDOWN_SHORTCUT, {
     description: 'Toggle the context breakdown panel in the status line',
